@@ -138,7 +138,9 @@ class BybitConnector:
         filename: str = f"{self.symbol}_{self.interval}_{self.start}_{self.end}.csv"
         with open(filename, mode="w", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow(["timestamp", "open", "high", "low", "close", "volume"])
+            writer.writerow(
+                ["timestamp", "open", "high", "low", "close", "volume", "turnover"]
+            )
 
             for candle in candles:
                 writer.writerow(candle)
@@ -152,9 +154,9 @@ if __name__ == "__main__":
     connector = BybitConnector(
         category="inverse",
         symbol="BTCUSD",
-        interval="D",
-        start="2022-04-01 00:00:00",
-        end="2024-12-03 00:00:00",
+        interval="5",
+        start="2016-01-01 00:00:00",
+        end="2024-12-04 00:00:00",
     )
 
     candles: list[list[str]] = connector.get_prices()
