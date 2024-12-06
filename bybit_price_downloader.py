@@ -1,6 +1,12 @@
 import requests
 import csv
+import logging
 from datetime import datetime
+from logging_config import setup_logging
+
+# Setup logging
+setup_logging()
+logger = logging.getLogger(__name__)
 
 
 class BybitConnector:
@@ -12,7 +18,7 @@ class BybitConnector:
     methods to retrieve data and save it to a CSV file.
     """
 
-    PRICE_API_URL = "https://api.bybit.com/v5/market/kline"
+    PRICE_API_URL: str = "https://api.bybit.com/v5/market/kline"
 
     def __init__(self, category: str, symbol: str, interval: str, start: str, end: str):
         """
@@ -42,8 +48,14 @@ class BybitConnector:
         Returns:
             int: The corresponding Unix timestamp.
         """
-        dt: datetime = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-        return int(dt.timestamp())
+        try:
+            dt: datetime = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+            return int(dt.timestamp())
+        except ValueError as e:
+            logger.error(
+                f"Invalid date format: {date_str}. Expected 'YYYY-MM-DD HH:MM:SS'."
+            )
+            raise ValueError("Invalid date format. Use 'YYYY-MM-DD HH:MM:SS'.") from e
 
     @staticmethod
     def _interval_to_seconds(interval: str) -> int:
@@ -71,7 +83,10 @@ class BybitConnector:
             "W": 604800,
             "M": 2592000,
         }
-
+        if interval not in conversion:
+            logger.warning(
+                f"Unknown interval '{interval}'. Defaulting to 'D' (86400 seconds)."
+            )
         return conversion.get(interval, 86400)
 
     def get_prices(self, limit: int = 1000) -> list[list[str]]:
@@ -93,14 +108,14 @@ class BybitConnector:
         seconds_per_candle: int = self._interval_to_seconds(self.interval)
 
         all_candles: list[list[str]] = []
-        batch_start = start_timestamp
+        batch_start: int = start_timestamp
 
         while batch_start < end_timestamp:
             max_batch_end: int = batch_start + (limit * seconds_per_candle)
             batch_end: int = min(max_batch_end, end_timestamp)
             candles_limit: int = (batch_end - batch_start) // seconds_per_candle
 
-            params = {
+            params: dict[str, int | str] = {
                 "category": self.category,
                 "symbol": self.symbol,
                 "interval": self.interval,
@@ -108,24 +123,44 @@ class BybitConnector:
                 "limit": candles_limit,
             }
 
-            response: requests.Response = requests.get(
-                self.PRICE_API_URL, params=params
-            )
-            response_data: dict = response.json()
+            try:
+                response: requests.Response = requests.get(
+                    self.PRICE_API_URL, params=params, timeout=10
+                )
+                response.raise_for_status()
+                response_data = response.json()
 
-            if response.status_code != 200 or response_data.get("retCode") != 0:
-                raise ValueError(f"API error: {response_data.get('retMsg')}")
+                if response_data.get("retCode") != 0:
+                    error_message = response_data.get(
+                        "retMsg", "Unknown error from API."
+                    )
+                    logger.error(f"API returned an error: {error_message}")
+                    raise ValueError(f"API error: {error_message}")
 
-            candles: list[list[str]] = response_data.get("result", {}).get("list", [])
+                candles: list[list[str]] = response_data.get("result", {}).get(
+                    "list", []
+                )
 
-            if not candles:
-                break
-            all_candles.extend(candles)
-            batch_start: int = batch_end
+                if not candles:
+                    logger.info("No more data available for the given range.")
+                    break
 
+                all_candles.extend(candles)
+                batch_start: int = batch_end
+
+            except requests.RequestException as e:
+                logger.error(f"HTTP request failed: {e}")
+                raise
+            except Exception as e:
+                logger.critical(
+                    f"Unexpected error during API request: {e}", exc_info=True
+                )
+                raise
+
+        logger.info(f"Fetched {len(all_candles)} candlesticks.")
         return all_candles
 
-    def save_to_csv(self, candles: list[list[str]]):
+    def save_to_csv(self, candles: list[list[str]]) -> None:
         """
         Saves the fetched candlestick data to a CSV file.
 
@@ -136,16 +171,17 @@ class BybitConnector:
             candles (list[list[str]]): The list of candlestick data to be saved.
         """
         filename: str = f"{self.symbol}_{self.interval}_{self.start}_{self.end}.csv"
-        with open(filename, mode="w", newline="") as file:
-            writer = csv.writer(file)
-            writer.writerow(
-                ["timestamp", "open", "high", "low", "close", "volume", "turnover"]
-            )
-
-            for candle in candles:
-                writer.writerow(candle)
-
-        print(f"Data has been saved to {filename}")
+        try:
+            with open(filename, mode="w", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow(
+                    ["timestamp", "open", "high", "low", "close", "volume", "turnover"]
+                )
+                writer.writerows(candles)
+            logger.info(f"Data has been saved to {filename}.")
+        except IOError as e:
+            logger.error(f"Failed to write data to {filename}: {e}")
+            raise
 
 
 # Example usage
@@ -154,7 +190,7 @@ if __name__ == "__main__":
     connector = BybitConnector(
         category="inverse",
         symbol="BTCUSD",
-        interval="5",
+        interval="M",
         start="2016-01-01 00:00:00",
         end="2024-12-04 00:00:00",
     )
