@@ -1,0 +1,6 @@
+services:
+  cryptobot:
+    build: .
+    volumes:
+      - data:data
+    command: tail -f /dev/null

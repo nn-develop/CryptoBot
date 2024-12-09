@@ -1,12 +1,13 @@
+import os
 import requests
 import csv
 import logging
 from datetime import datetime
-from logging_config import setup_logging
+from src.logger import setup_logging
 
 # Setup logging
 setup_logging()
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class BybitConnector:
@@ -160,27 +161,36 @@ class BybitConnector:
         logger.info(f"Fetched {len(all_candles)} candlesticks.")
         return all_candles
 
-    def save_to_csv(self, candles: list[list[str]]) -> None:
+    def save_to_csv(self, candles: list[list[str]], directory: str) -> None:
         """
-        Saves the fetched candlestick data to a CSV file.
+        Saves the fetched candlestick data to a CSV file in a specified directory.
 
         The file is named based on the symbol, interval, and date range. The columns in the CSV file are:
         timestamp, open, high, low, close, and volume.
 
         Args:
             candles (list[list[str]]): The list of candlestick data to be saved.
+            directory (str): The directory path where the CSV file should be saved.
         """
+
+        # Ensure the directory exists
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        # Construct the full file path
         filename: str = f"{self.symbol}_{self.interval}_{self.start}_{self.end}.csv"
+        file_path: str = os.path.join(directory, filename)
+
         try:
-            with open(filename, mode="w", newline="") as file:
+            with open(file_path, mode="w", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerow(
                     ["timestamp", "open", "high", "low", "close", "volume", "turnover"]
                 )
                 writer.writerows(candles)
-            logger.info(f"Data has been saved to {filename}.")
+            logger.info(f"Data has been saved to {file_path}.")
         except IOError as e:
-            logger.error(f"Failed to write data to {filename}: {e}")
+            logger.error(f"Failed to write data to {file_path}: {e}")
             raise
 
 
@@ -191,11 +201,12 @@ if __name__ == "__main__":
         category="inverse",
         symbol="BTCUSD",
         interval="M",
-        start="2016-01-01 00:00:00",
+        start="2024-12-01 00:00:00",
         end="2024-12-04 00:00:00",
     )
 
     candles: list[list[str]] = connector.get_prices()
 
-    # Save the result to CSV
-    connector.save_to_csv(candles)
+    # Specify the directory to save the CSV file
+    directory = "./data/raw"
+    connector.save_to_csv(candles, directory)
